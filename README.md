@@ -1,7 +1,7 @@
 SymLua
 ======
 
-A draft concept for Symbolic Calculus in Lua.
+A conceptual draft for Symbolic Calculus in Lua.
 
 Test it doing:
 
