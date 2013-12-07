@@ -29,8 +29,6 @@
 -- diff: a function for differentiation, dfdx = diff(f, x)
 
 
-
-
 -- var is a table with useful functions for variable type declarations
 local var = {}
 
@@ -73,16 +71,101 @@ local diff = function(symb_var, partial)
   return symb_var.grad(tgt)
 end
 
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+
+local commutative = function(args)
+  table.sort(args, function(a,b) return a.name < b.name end)
+  return args
+end
+
+local is = function(v,dtype) return v.dtype == dtype end
+local is_op = function(v,op) return v.op == op end
+
+local coercion   = {}
+local op = {}
+
+function expr(name, dtype, args)
+  local sv = svar(string.format("(%s %s)",
+				name, table.concat(args, " ")),
+		  dtype)
+  sv.op   = name
+  sv.args = args
+  return sv
+end
+
+local add_op = function(name, pretty_name, dtype,
+			compose_func, compute_func, diff_func)
+  if not op[name] then
+    op[name] = {}
+    setmetatable(op[name],
+		 {
+		   __call = function(t,...)
+		     local dtype = coercion(...)
+		     local data  = assert(op[name][dtype])
+		     local vars = data.compose_func(...)
+		     return expr( name, dtype, vars )
+		   end,
+		 })
+  end
+  op[name][dtype] = {
+    pretty_name  = pretty_name,
+    compose_func = compose_func or function() error("Composition not implemented") end,
+    compute_func = compute_func or function() error("Computation not implemented") end,
+    diff_func    = diff_func or function() error("Differation not implemented") end,
+  }
+end
+
+add_op('add', '+', SCALAR,
+       function(...)
+	 local args = table.pack(...)
+	 local dict = { }
+	 local vars = { }
+	 -- apply merge with add childs, and count variables occurences
+	 for i,v in ipairs(args) do
+	   if is(v,CONSTANT) then dict.cte = (dict.cte or 0) + v()
+	   else
+	     local list = { v }
+	     if is_op(v,'add') then list = v.args end
+	     for j,vj in ipairs(list) do
+	       dict[vj.name] = (dict[vj.name] or 0) + 1
+	       vars[vj.name] = vj
+	     end
+	   end
+	 end
+	 -- simplify replicated variables
+	 local result = { }
+	 if dict.cte then table.insert(result, dict.cte) end
+	 for i,v in ipairs(vars) do
+	   if dict[v.name] > 1 then v = dict[v.name] * v end
+	   table.insert(resut, v)
+	 end
+	 return commutative(result)
+       end,
+       function(...)
+	 local args = table.pack(...)
+	 local aux = args[1]()
+	 for i=2,#args do aux = aux + args[i]() end
+	 return aux
+       end,
+       function(...)
+       end)
+
+d = op.add(a,b,c)
+d = a + b + c
+
+
 -- Function for symbolic variable declaration. Receives a name and a type. The
 -- symbolic variable has this fields:
-
+--
 --  name = the name of the variable, or the expression canonical representation
-
+--
 --  func = a function which computes the value of the variable. In case of
 --         operations, this function computes it.
-
+--
 --  args = arguments needed by previous function, by default an empty table
-
+--
 --  op = a string indicating the name of the operation, when needed
 
 local mt = { }
