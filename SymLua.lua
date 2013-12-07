@@ -134,14 +134,17 @@ local add_op = function(name, pretty_name, dtype,
   }
 end
 
-local add_type = function(dtype,constructor)
+local add_dtype = function(dtype,constructor)
   var[dtype] = function(...)
     local args = table.pack(...)
     local list = {}
-    for i,v in ipairs(args) do
-      local sv = svar(tostring(v), dtype)
-      constructor(sv,v)
-      table.insert(list, sv)
+    for i,arg in ipairs(args) do
+      local str = tostring(arg)
+      for v in str:match("[^%s]+") do
+	local sv = svar(tostring(v), dtype)
+	constructor(sv,v)
+	table.insert(list, sv)
+      end
     end
     return table.unpack(list)
   end
