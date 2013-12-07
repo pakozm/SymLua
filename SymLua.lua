@@ -32,6 +32,23 @@
 -- var is a table with useful functions for variable type declarations
 local var = {}
 
+local math_n1_list = {
+  "sqrt",
+  "frexp",
+  "exp", "log", "log10",
+  "abs", "floor", "ceil",
+  "deg", "rad",
+  "cos", "sin", "tan",
+  "cosh", "sinh", "tanh",
+  "acos", "asin", "atan",
+}
+
+local math_n2_list = {
+  "atan2",
+  "min", "max",
+  "ldexp",
+}
+
 -- current basic types
 local NUMBER='number'
 local SCALAR='scalar'
@@ -117,44 +134,18 @@ local add_op = function(name, pretty_name, dtype,
   }
 end
 
-add_op('add', '+', SCALAR,
-       function(...)
-	 local args = table.pack(...)
-	 local dict = { }
-	 local vars = { }
-	 -- apply merge with add childs, and count variables occurences
-	 for i,v in ipairs(args) do
-	   if is(v,CONSTANT) then dict.cte = (dict.cte or 0) + v()
-	   else
-	     local list = { v }
-	     if is_op(v,'add') then list = v.args end
-	     for j,vj in ipairs(list) do
-	       dict[vj.name] = (dict[vj.name] or 0) + 1
-	       vars[vj.name] = vj
-	     end
-	   end
-	 end
-	 -- simplify replicated variables
-	 local result = { }
-	 if dict.cte then table.insert(result, dict.cte) end
-	 for i,v in ipairs(vars) do
-	   if dict[v.name] > 1 then v = dict[v.name] * v end
-	   table.insert(resut, v)
-	 end
-	 return commutative(result)
-       end,
-       function(...)
-	 local args = table.pack(...)
-	 local aux = args[1]()
-	 for i=2,#args do aux = aux + args[i]() end
-	 return aux
-       end,
-       function(...)
-       end)
-
-d = op.add(a,b,c)
-d = a + b + c
-
+local add_type = function(dtype,constructor)
+  var[dtype] = function(...)
+    local args = table.pack(...)
+    local list = {}
+    for i,v in ipairs(args) do
+      local sv = svar(tostring(v), dtype)
+      constructor(sv,v)
+      table.insert(list, sv)
+    end
+    return table.unpack(list)
+  end
+end
 
 -- Function for symbolic variable declaration. Receives a name and a type. The
 -- symbolic variable has this fields:
