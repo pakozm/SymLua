@@ -28,10 +28,6 @@
 --
 -- diff: a function for differentiation, dfdx = diff(f, x)
 
-
--- var is a table with useful functions for variable type declarations
-local var = {}
-
 local math_n1_list = {
   "sqrt",
   "frexp",
@@ -49,10 +45,33 @@ local math_n2_list = {
   "ldexp",
 }
 
--- current basic types
-local NUMBER='number'
-local SCALAR='scalar'
-local CONSTANT='constant'
+local NULL = "@NULL@"
+
+local infer_rules    = {}
+local coercion_rules = {}
+local op             = {}
+local var            = {}
+local svar_mt        = {}
+local svar
+
+local coercion = function(a)
+  local dtype = (type(a)=="table" and a.dtype) or type(a)
+  local func = coercion_rules[dtype]
+  return (func and func(a)) or a
+end
+
+local infer = function(a,b)
+  local a,b = coercion(a),coercion(b)
+  if a.dtype > b.dtype then a,b = b,a end
+  local aux = assert(infer_rules[a.dtype],
+		     "Type inference fail: " .. a.dtype .. " " .. b.dtype)
+  return assert(aux[b.dtype],
+		"Type inference fail: " .. a.dtype .. " " .. b.dtype)
+end
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
 
 -- cache functions
 local cache_add = function(cache, name, value)
@@ -63,10 +82,16 @@ local cache_get = function(cache, name)
   return cache[name]
 end
 
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
 -- computation function, is the primary function, receives a symbolic variable,
 -- a table with initial values, and optionally a table where operations will be
 -- cached
 local compute = function(symb_var, t, prev_cache)
+  if type(symb_var) ~= "table" or not symb_var.issvar then return symb_var end
+  local t     = t or { }
   local cache = prev_cache or { }
   for name,value in pairs(t) do
     if type(value) ~= "table" then
@@ -100,55 +125,97 @@ end
 local is = function(v,dtype) return v.dtype == dtype end
 local is_op = function(v,op) return v.op == op end
 
-local coercion   = {}
-local op = {}
+local expr = function(name, dtype, args)
+  local o = op[name][dtype]
+  if o.compose_func then args = o.compose_func(table.unpack(args)) end
+  if #args == 1 then
+    return args[1]
+  else
+    local str_tbl = {} for i=1,#args do str_tbl[i] = tostring(args[i]) end
+    local pretty = string.format("(%s %s)",
+				 o.pretty_name,
+				 table.concat(str_tbl, " "))
+    --    local pretty = string.format("( %s )",
+    --				 table.concat(str_tbl, o.pretty_name))
+    local sv = svar(pretty, dtype)
+    sv.op   = name
+    sv.args = args
+    sv.func = function(_,...) return o.compute_func(...) end
+    sv.diff = o.diff_func
+    return sv
+  end
+end
 
-function expr(name, dtype, args)
-  local sv = svar(string.format("(%s %s)",
-				name, table.concat(args, " ")),
-		  dtype)
-  sv.op   = name
-  sv.args = args
-  return sv
+----------------------------------------------------------------------------
+----------------------------------------------------------------------------
+----------------------------------------------------------------------------
+
+local add_coercion_rule = function(dtype, func)
+  assert(not coercion_rules[dtype],
+	 "Redifinition of coercion for type: " .. dtype)
+  -- SymLua dtype or Lua type coercion
+  coercion_rules[dtype] = func
+end
+
+local add_infer_rule = function(a_dtype, b_dtype, result)
+  if a_dtype > b_dtype then a_dtype,b_dtype = b_dtype,a_dtype end
+  infer_rules[a_dtype]          = infer_rules[a_dtype] or {}
+  infer_rules[a_dtype][b_dtype] = result
 end
 
 local add_op = function(name, pretty_name, dtype,
 			compose_func, compute_func, diff_func)
+  assert(compose_func or compute_func)
   if not op[name] then
     op[name] = {}
     setmetatable(op[name],
 		 {
-		   __call = function(t,...)
-		     local dtype = coercion(...)
-		     local data  = assert(op[name][dtype])
-		     local vars = data.compose_func(...)
-		     return expr( name, dtype, vars )
+		   __call = function(t, ...)
+		     local args  = table.pack(...)
+		     args[1]     = coercion(args[1])
+		     local dtype = args[1].dtype
+		     for i=2,#args do
+		       args[i] = coercion(args[i])
+		       dtype = infer(dtype,args[i])
+		     end
+		     return expr( name, dtype, args )
 		   end,
 		 })
   end
   op[name][dtype] = {
     pretty_name  = pretty_name,
-    compose_func = compose_func or function() error("Composition not implemented") end,
-    compute_func = compute_func or function() error("Computation not implemented") end,
+    compose_func = compose_func,
+    compute_func = compute_func,
     diff_func    = diff_func or function() error("Differation not implemented") end,
   }
 end
 
-local add_dtype = function(dtype,constructor)
+local add_dtype = function(dtype,constructor,func,diff_func)
+  if dtype == "number" or dtype == "string" or dtype == "table" then
+    error("Lua types 'number', 'string' and 'table' are reserved")
+  end
   var[dtype] = function(...)
     local args = table.pack(...)
     local list = {}
     for i,arg in ipairs(args) do
       local str = tostring(arg)
-      for v in str:match("[^%s]+") do
+      for v in str:gmatch("[^%s]+") do
 	local sv = svar(tostring(v), dtype)
-	constructor(sv,v)
+	local aux = (constructor and constructor(v)) or { }
+	for j,vj in pairs(aux) do assert(not sv[j]) sv[j]=vj end
+	sv.func = func or sv.func
+	sv.diff_func = diff_func
 	table.insert(list, sv)
       end
     end
     return table.unpack(list)
   end
+  add_infer_rule(dtype,dtype,dtype)
 end
+
+----------------------------------------------------------------------------
+----------------------------------------------------------------------------
+----------------------------------------------------------------------------
 
 -- Function for symbolic variable declaration. Receives a name and a type. The
 -- symbolic variable has this fields:
@@ -162,376 +229,81 @@ end
 --
 --  op = a string indicating the name of the operation, when needed
 
-local mt = { }
-local svar = function(name, dtype)
-  -- valores por defecto de una variable
+svar = function(name, dtype)
+  -- default values of symbolic variable
   local v = {
-    name=name,
-    dtype=dtype,
-    args = { },
+    name  = name,
+    dtype = dtype,
+    args  = { },
+    issvar = true,
   }
-  v.func = function(cache)
-    -- su funcion se devuelve a si misma
-    return v
-  end
-  v.grad = function(tgt)
-    if tgt == v.name then return var.constant(1)
-    else return var.constant(0)
-    end
-  end
-  setmetatable(v, mt)
+  v.func = function() return v end -- identity function
+  -- v.grad = function(tgt)
+  --   if tgt == v.name then return var.constant(1)
+  --   else return var.constant(0)
+  --   end
+  -- end
+  setmetatable(v, svar_mt)
   return v
 end
 
--- auxiliary function which
-local auto = function(v)
-  if type(v) == "string" then return svar(v)
-  elseif type(v) ~= "table" then return var.constant(v)
-  else return v
-  end
-end
-
-local copy = function(v)
-  local sv = svar(v.name,v.dtype)
-  for key,value in pairs(v) do sv[key] = value end
-  return sv
-end
-
-local coercion = function(dtype1, dtype2)
-  if dtype1 == dtype2 then return dtype1 end
-  if dtype1 == CONSTANT then return dtype2
-  else return dtype1
-  end
-end
-
--- auxiliary function to produce binary operator functions
-local make_op2 = function(op_symbol,
-			  commutative,
-			  left_zero,  left_ident,
-			  right_zero, right_ident,
-			  ident,
-			  func,
-			  grad_maker,
-			  dtype)
-  return function(a,b)
-    local a,b    = auto(a),auto(b)
-    local v_type = dtype or coercion(a.dtype, b.dtype)
-    local v
-    if a == left_zero or b == right_zero then v = copy(ident)
-    elseif a == left_ident then v = copy(b)
-    elseif b == right_ident then v = copy(a)
-    elseif a.dtype == CONSTANT and b.dtype == CONSTANT then
-      v = var.constant( func( a(),b() ) )
-    else
-      local args = { a, b }
-      if commutative then
-	table.sort(args, function(a,b) return a.name < b.name end)
-      end
-      -- variable simbolica resultante, con el nombre canonico de la operacion
-      v = svar(string.format("(%s %s %s)",
-			     args[1].name, op_symbol, args[2].name),
-	       v_type)
-      v.func = func
-      v.op   = op_symbol
-      v.args = args
-    end
-    -- print(a,op_symbol,b,"=",v, v.dtype, a.dtype, b.dtype)
-    v.grad = grad_maker(a,b)
-    return v
-  end
-end
-
--- auxiliary function to produce unary operator functions
-local make_op1 = function(op_symbol, zero, func, grad_maker)
-  return function(a)
-    local a = auto(a)
-    if a == zero then return zero end
-    -- variable simbolica resultante, con el nombre canonico de la operacion
-    local v = svar(string.format("(%s %s)", op_symbol, a.name), a.dtype)
-    v.op = op_symbol
-    v.args = { a }
-    v.func = func
-    v.grad = grad_maker(a)
-    return v
-  end
-end
-
------------------------------------------------------------------------------
------------------------------------------------------------------------------
------------------------------------------------------------------------------
-
--- scalar variable creation
-var.scalar = function(...)
-  local t = table.pack(...)
-  local list = {}
-  for i=1,#t do
-    for name in t[i]:gmatch("[^%s]+") do
-      table.insert(list, svar(name, SCALAR))
-    end
-  end
-  return table.unpack(list)
-end
-
--- constant variable creation
-var.constant = function(...)
-  local t = table.pack(...)
-  local list = {}
-  for i=1,#t do
-    local value = t[i]
-    local v = svar(tostring(value), CONSTANT)
-    v.value = value
-    v.func  = function() return value end
-    table.insert(list, v)
-  end
-  return table.unpack(list)
-end
-
--- METATABLE for symbolic variables
-
--- the () operator returns the result in cache, or executes the operation
-mt.__call = function(v, cache)
+-- -- the () operator returns the result in cache, or executes the operation
+svar_mt.__call = function(v, cache)
   local cache  = cache or {}
   local result = cache_get(cache, v.name)
   if not result then
-    local args = {}
+    local args = { }
     for i,sv in ipairs(v.args) do args[i] = sv(cache) end
-    result = v.func(table.unpack(args))
+    result = v:func(table.unpack(args))
   elseif type(result) == "table" then result = result(cache)
   end
   cache_add(cache, v.name, result)
   return result
 end
 
--- mathematical operations
-mt.__add    = make_op2('+',  true,
-		       nil, var.constant(0),
-		       nil, var.constant(0),
-		       var.constant(0),
-		       function(a,b) return a+b  end,
-		       function(a,b)
-			 return function(tgt)
-			   return a.grad(tgt) + b.grad(tgt)
-			 end
-		       end)
-mt.__sub    = make_op2('-',  false,
-		       nil, nil,
-		       nil, var.constant(0),
-		       var.constant(0),
-		       function(a,b) return a-b  end,
-		       function(a,b)
-			 return function(tgt)
-			   return a.grad(tgt) - b.grad(tgt)
-			 end
-		       end)
-mt.__mul    = make_op2('*',  true,
-		       var.constant(0), var.constant(1),
-		       var.constant(0), var.constant(1),
-		       var.constant(0),
-		       function(a,b) return a*b  end,
-		       function(a,b)
-			 return function(tgt)
-			   return a.grad(tgt)*b + a*b.grad(tgt)
-			 end
-		       end)
-mt.__div    = make_op2('/',  false,
-		       var.constant(0), var.constant(1),
-		       nil, var.constant(1),
-		       var.constant(1),
-		       function(a,b) return a/b  end,
-		       function(a,b)
-			 return function(tgt)
-			   return (a.grad(tgt)*b - a*b.grad(tgt)) / (b^2)
-			 end
-		       end)
-mt.__pow    = make_op2('^',  false,
-		       nil, var.constant(1),
-		       var.constant(0), var.constant(1),
-		       var.constant(1),
-		       function(a,b) return a^b  end,
-		       function(a,b)
-			 return function(tgt)
-			   return b * (a^(b-1)) * a.grad(tgt)
-			 end
-		       end)
-mt.__mod    = make_op2('%',  false,
-		       nil, nil,
-		       nil, nil,
-		       nil,
-		       function(a,b) return a%b  end,
-		       function()
-			 return function() error("Non differentiable function") end
-		       end)
-mt.__concat = make_op2('..', false,
-		       nil, nil,
-		       nil, nil,
-		       nil,
-		       function(a,b) return a..b end,
-		       function()
-			 return function() error("Non differentiable function") end
-		       end)
-mt.__unm    = make_op1('-',
-		       var.constant(0),
-		       function(a) return -a end,
-		       function(a)
-			 return function(tgt)
-			   return -a.grad(tgt)
-			 end
-		       end)
-mt.__eq     = function(a,b) return a.dtype==b.dtype and a.name == b.name end
--- for printing purposes
-mt.__tostring = function(v) return v.name end
-
--- mathematical functions
-
-local infer = function(a)
-  if type(a) == "table" then return assert(a.dtype, "Incorrect type") end
-  return type(a)
+svar_mt.__tostring = function(v)
+  return v.name
 end
 
-local math_gradients = {
-  [SCALAR] = {
-    exp = function(a)
-      return function(tgt)
-	return var.exp(a) * a.grad(tgt)
-      end
-    end,
-    floor = function()
-      return function() error("Not differentiable function") end
-    end,
-    ceil = function()
-      return function() error("Not differentiable function") end
-    end,
-    abs = function()
-      return function() error("Non continuous function") end
-    end,
-    deg = function()
-      return function() error("Not implemented gradient") end
-    end,
-    rad = function()
-      return function() error("Not implemented gradient") end
-    end,
-    frexp = function()
-      return function() error("Not implemented gradient") end
-    end,
-    ldexp = function()
-      return function() error("Not implemented gradient") end
-    end,
-    min = function()
-      return function() error("Not implemented gradient") end
-    end,
-    max = function()
-      return function() error("Not implemented gradient") end
-    end,
-    sinh = function(a)
-      return function(tgt)
-	return var.cosh(a) * a.grad(tgt)
-      end
-    end,
-    cosh = function(a)
-      return function(tgt)
-	return var.sinh(a) * a.grad(tgt)
-      end
-    end,
-    tanh = function()
-      return function() error("Not implemented gradient") end
-    end,
-    sin = function(a)
-      return function(tgt)
-	return var.cos(a) * a.grad(tgt)
-      end
-    end,
-    cos = function(a)
-      return function(tgt)
-	return var.sin(a) * a.grad(tgt)
-      end
-    end,
-    tan = function()
-      return function() error("Not implemented gradient") end
-    end,
-    asin = function(a)
-      return function(tgt)
-	return 1 / var.sqrt(1 - a^2) * a.grad(tgt)
-      end
-    end,
-    acos = function(a)
-      return function(tgt)
-	return -1 / var.sqrt(1 - a^2) * a.grad(tgt)
-      end
-    end,
-    atan = function(a)
-      return function(tgt)
-	return 1 / (1 + a^2) * a.grad(tgt)
-      end
-    end,
-    atan2 = function(a,b)
-      return function(tgt)
-	return 1 / (1 + (a/b)^2) * (a/b).grad(tgt)
-      end
-    end,
-    log10 = function(a)
-      return function(tgt)
-	return 1 / (a + var.log(10)) * a.grad(tgt)
-      end
-    end,
-    log = function(a)
-      return function(tgt)
-	return 1/a * a.grad(tgt)
-      end
-    end,
-    sqrt = function(a)
-      return function(tgt)
-	return 1/(2*a) * a.grad(tgt)
-      end
-    end,
-  }
-}
+svar_mt.__eq = function(a,b) return a.name == b.name end
 
-local var_math = { }
-
--- unary math operations
-for _,name in ipairs{ "exp", "floor", "sinh", "log10", "log", "deg", "tanh",
-		      "abs", "acos", "cos", "sqrt", "sin", "rad", "tan",
-		      "frexp", "cosh", "ceil", "atan", "asin" } do
-  var_math[name] = {
-    [NUMBER] = math[name],
-    [SCALAR] = make_op1(name, nil,
-			function(a) return var_math[name][infer(a)](a) end,
-			math_gradients[SCALAR][name]),
-  }
-end
-
--- binary math operations
-for _,name in ipairs{ "atan2", "min", "max", "ldexp" } do
-  var_math[name] = {
-    [NUMBER] = math[name],
-    [SCALAR] = make_op2(name, false,
-			nil, nil,
-			nil, nil,
-			nil,
-			function(a,b)
-			  local dtype = infer(a)
-			  assert(dtype == infer(b),
-				 string.format("Incorrect types %s != %s",
-					       dtype, infer(b)))
-			  return var_math[name][dtype](a,b)
-			end,
-			math_gradients[SCALAR][name]),
-  }
-end
-
--- Inserta las funciones matematicas en var.BLAH
-for i,v in pairs(var_math) do
-  var[i] = function(sv)
-    return assert(v[sv.dtype], "Math functions need dtype")(sv)
+local make_op = function(name)
+  return function(a,b)
+    a,b = coercion(a),coercion(b)
+    local dtype = infer(a,b)
+    local e = expr( name, dtype, {a,b} )
+    return e
   end
 end
 
-------------------------------------------------------------------------------
-------------------------------------------------------------------------------
-------------------------------------------------------------------------------
+svar_mt.__add = make_op('add')
+svar_mt.__sub = make_op('sub')
+svar_mt.__mul = make_op('mul')
+svar_mt.__div = make_op('div')
+svar_mt.__pow = make_op('pow')
+svar_mt.__unm = make_op('unm')
+
+-----------------------------------------------------------------------------
+-----------------------------------------------------------------------------
+-----------------------------------------------------------------------------
 
 return {
-  var     = var,
-  compute = compute,
-  diff    = diff,
+  var               = var,
+  svar              = svar,
+  expr              = expr,
+  compute           = compute,
+  diff              = diff,
+  is                = is,
+  is_op             = is_op,
+  add_op            = add_op,
+  add_dtype         = add_dtype,
+  add_coercion_rule = add_coercion_rule,
+  add_infer_rule    = add_infer_rule,
+  coercion          = coercion,
+  infer             = infer,
+  commutative       = commutative,
+  math_n1_list      = math_n1_list,
+  math_n2_list      = math_n2_list,
+  _NAME             = "SymLua",
+  _VERSION          = "0.1",
 }

@@ -1,14 +1,18 @@
 local SymLua = require 'SymLua'
-local is = SymLua.is
-local is_op = SymLua.is_op
-local add_op = SymLua.add_op
-local add_type = SymLua.add_type
-local math_n1_list = SymLua.math_n1_list
-local math_n2_list = SymLua.math_n2_list
+
+local is                = SymLua.is
+local var               = SymLua.var
+local is_op             = SymLua.is_op
+local add_op            = SymLua.add_op
+local add_dtype         = SymLua.add_dtype
+local add_coercion_rule = SymLua.add_coercion_rule
+local add_infer_rule    = SymLua.add_infer_rule
+local math_n1_list      = SymLua.math_n1_list
+local math_n2_list      = SymLua.math_n2_list
+local coercion          = SymLua.coercion
+local infer             = SymLua.infer
 
 local CONSTANT = 'constant'
-
-add_type(CONSTANT, function(s, v) s.value=v end)
 
 local make_composer = function(reducer)
   return function(...)
@@ -16,10 +20,11 @@ local make_composer = function(reducer)
     local result = args[1]()
     for i=2,#args do
       local v = args[i]
-      assert(is(v,CONSTANT), "Incorrect types")
-      result = reducer(result, v())
+      assert(type(v) == "number" or is(v,CONSTANT))
+      v = (type(v) == "number" and v) or v()
+      result = reducer(result, v)
     end
-    return var.constant(result)
+    return { var.constant(result) }
   end
 end
 
@@ -29,11 +34,19 @@ local diff_func = function(...)
   end
 end
 
+add_dtype(CONSTANT,
+	  function(v) return { value=v } end,
+	  function(tbl) return tbl.value end,
+	  function(tbl,tgt) return var.constant(0) end)
+
+-- Lua type coercion
+add_coercion_rule("number", function(v) return var.constant(v) end)
+
 add_op('add', '+', CONSTANT,
        -- composition
        make_composer(function(a,b) return a+b end),
        -- operation
-       function(a,b) return a+b end,
+       nil,
        -- differentiation
        diff_func)
 
@@ -41,7 +54,7 @@ add_op('sub', '-', CONSTANT,
        -- composition
        make_composer(function(a,b) return a-b end),
        -- operation
-       function(a,b) return a-b end,
+       nil,
        -- differentiation
        diff_func)
 
@@ -49,7 +62,7 @@ add_op('mul', '*', CONSTANT,
        -- composition
        make_composer(function(a,b) return a*b end),
        -- operation
-       function(a,b) return a*b end,
+       nil,
        -- differentiation
        diff_func)
 
@@ -57,7 +70,7 @@ add_op('div', '/', CONSTANT,
        -- composition
        make_composer(function(a,b) return a/b end),
        -- operation
-       function(a,b) return a/b end,
+       nil,
        -- differentiation
        diff_func)
 
@@ -65,7 +78,7 @@ add_op('pow', '^', CONSTANT,
        -- composition
        make_composer(function(a,b) return a^b end),
        -- operation
-       function(a,b) return a^b end,
+       nil,
        -- differentiation
        diff_func)
 
@@ -73,20 +86,26 @@ add_op('unm', '-', CONSTANT,
        -- composition
        make_composer(function(a) return -a end),
        -- operation
-       function(a) return -a end,
+       nil,
        -- differentiation
        diff_func)
 
 for _,name in ipairs(math_n1_list) do
   add_op(name, name, CONSTANT,
 	 make_composer(function(a) return math[name](a) end),
-	 function(a) return math[name](a) end,
+	 nil,
 	 diff_func)
 end
 
 for _,name in ipairs(math_n2_list) do
   add_op(name, name, CONSTANT,
 	 make_composer(function(a,b) return math[name](a,b) end),
-	 function(a) return math[name](a,b) end,
+	 nil,
 	 diff_func)
 end
+
+return {
+  dtype    = CONSTANT,
+  _NAME    = "SymLua.constant",
+  _VERSION = "0.1",
+}
