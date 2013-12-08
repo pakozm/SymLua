@@ -297,6 +297,7 @@ svar_mt.__unm = make_op('unm')
 
 return {
   var               = var,
+  op                = op,
   svar              = svar,
   expr              = expr,
   compute           = compute,
