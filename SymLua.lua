@@ -60,13 +60,12 @@ local coercion = function(a)
   return (func and func(a)) or a
 end
 
-local infer = function(a,b)
-  local a,b = coercion(a),coercion(b)
-  if a.dtype > b.dtype then a,b = b,a end
-  local aux = assert(infer_rules[a.dtype],
-		     "Type inference fail: " .. a.dtype .. " " .. b.dtype)
-  return assert(aux[b.dtype],
-		"Type inference fail: " .. a.dtype .. " " .. b.dtype)
+local infer = function(a_dtype,b_dtype)
+  if a_dtype > b_dtype then a_dtype,b_dtype = b_dtype,a_dtype end
+  local aux = assert(infer_rules[a_dtype],
+		     "Type inference fail: " .. a_dtype .. " " .. b_dtype)
+  return assert(aux[b_dtype],
+		"Type inference fail: " .. a_dtype .. " " .. b_dtype)
 end
 
 --------------------------------------------------------------------------
@@ -176,7 +175,7 @@ local add_op = function(name, pretty_name, dtype,
 		     local dtype = args[1].dtype
 		     for i=2,#args do
 		       args[i] = coercion(args[i])
-		       dtype = infer(dtype,args[i])
+		       dtype = infer(dtype,args[i].dtype)
 		     end
 		     return expr( name, dtype, args )
 		   end,
@@ -278,7 +277,7 @@ svar_mt.__eq = function(a,b) return a.name == b.name end
 local make_op = function(name)
   return function(a,b)
     a,b = coercion(a),coercion(b)
-    local dtype = infer(a,b)
+    local dtype = infer(a.dtype,b.dtype)
     local e = expr( name, dtype, {a,b} )
     return e
   end

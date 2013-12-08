@@ -39,7 +39,7 @@ local commutative_and_distributive_operation = function(args, op1, op2,
     local list = { v }
     if is_op(v,op1) then list = v.args end
     for j,vj in ipairs(list) do
-      local vjtype = infer(vj,vj)
+      local vjtype = infer(vj.dtype,vj.dtype)
       if vjtype == CONSTANT then dict.cte = reducer1((dict.cte or ident), vj())
       else
 	if is_op(vj,op2) and #vj.args == 2 and ( is(vj.args[1],CONSTANT) or is(vj.args[2],CONSTANT) ) then

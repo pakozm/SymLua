@@ -10,13 +10,18 @@ local add_infer_rule    = SymLua.add_infer_rule
 local math_n1_list      = SymLua.math_n1_list
 local math_n2_list      = SymLua.math_n2_list
 local coercion          = SymLua.coercion
-local infer             = SymLua.infer
 
 local CONSTANT = 'constant'
 
-local make_composer = function(reducer)
+local make_composer_n1 = function(reducer)
+  return function(a)
+    return { var.constant(reducer(a())) }
+  end
+end
+
+local make_composer_n2 = function(reducer)
   return function(...)
-    local args   = table.pack(...)
+    local args = table.pack(...)
     local result = args[1]()
     for i=2,#args do
       local v = args[i]
@@ -44,7 +49,7 @@ add_coercion_rule("number", function(v) return var.constant(v) end)
 
 add_op('add', '+', CONSTANT,
        -- composition
-       make_composer(function(a,b) return a+b end),
+       make_composer_n2(function(a,b) return a+b end),
        -- operation
        nil,
        -- differentiation
@@ -52,7 +57,7 @@ add_op('add', '+', CONSTANT,
 
 add_op('sub', '-', CONSTANT,
        -- composition
-       make_composer(function(a,b) return a-b end),
+       make_composer_n2(function(a,b) return a-b end),
        -- operation
        nil,
        -- differentiation
@@ -60,7 +65,7 @@ add_op('sub', '-', CONSTANT,
 
 add_op('mul', '*', CONSTANT,
        -- composition
-       make_composer(function(a,b) return a*b end),
+       make_composer_n2(function(a,b) return a*b end),
        -- operation
        nil,
        -- differentiation
@@ -68,7 +73,7 @@ add_op('mul', '*', CONSTANT,
 
 add_op('div', '/', CONSTANT,
        -- composition
-       make_composer(function(a,b) return a/b end),
+       make_composer_n2(function(a,b) return a/b end),
        -- operation
        nil,
        -- differentiation
@@ -76,7 +81,7 @@ add_op('div', '/', CONSTANT,
 
 add_op('pow', '^', CONSTANT,
        -- composition
-       make_composer(function(a,b) return a^b end),
+       make_composer_n2(function(a,b) return a^b end),
        -- operation
        nil,
        -- differentiation
@@ -84,7 +89,7 @@ add_op('pow', '^', CONSTANT,
 
 add_op('unm', '-', CONSTANT,
        -- composition
-       make_composer(function(a) return -a end),
+       make_composer_n1(function(a) return -a end),
        -- operation
        nil,
        -- differentiation
@@ -92,14 +97,14 @@ add_op('unm', '-', CONSTANT,
 
 for _,name in ipairs(math_n1_list) do
   add_op(name, name, CONSTANT,
-	 make_composer(function(a) return math[name](a) end),
+	 make_composer_n1(function(a) return math[name](a) end),
 	 nil,
 	 diff_func)
 end
 
 for _,name in ipairs(math_n2_list) do
   add_op(name, name, CONSTANT,
-	 make_composer(function(a,b) return math[name](a,b) end),
+	 make_composer_n2(function(a,b) return math[name](a,b) end),
 	 nil,
 	 diff_func)
 end

@@ -3,14 +3,14 @@ local constant = require 'SymLua.constant'
 local scalar   = require 'SymLua.scalar'
 
 local var      = SymLua.var
+local op       = SymLua.op
 local compute  = SymLua.compute
 local CONSTANT = constant.dtype
 local SCALAR   = scalar.dtype
 
-local a = var.constant(4)
-local b = var.constant(7)
+local a,b = var.constant(4,7)
 
-local c = a + b*10
+local c = op.atan2(op.log( a + b*10 ), 3) * op.exp(2)
 
 print( compute(c) )
 
