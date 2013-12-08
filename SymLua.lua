@@ -198,10 +198,18 @@ local add_dtype = function(dtype,constructor,func,diff_func)
     local args = table.pack(...)
     local list = {}
     for i,arg in ipairs(args) do
-      local str = tostring(arg)
-      for v in str:gmatch("[^%s]+") do
-	local sv = svar(tostring(v), dtype)
-	local aux = (constructor and constructor(v)) or { }
+      if type(arg) == "string" then
+	for v in arg:gmatch("[^%s]+") do
+	  local sv = svar(tostring(v), dtype)
+	  local aux = (constructor and constructor(v)) or { }
+	  for j,vj in pairs(aux) do assert(not sv[j]) sv[j]=vj end
+	  sv.func = func or sv.func
+	  sv.diff_func = diff_func
+	  table.insert(list, sv)
+	end
+      else
+	local sv = svar(tostring(arg), dtype)
+	local aux = (constructor and constructor(arg)) or { }
 	for j,vj in pairs(aux) do assert(not sv[j]) sv[j]=vj end
 	sv.func = func or sv.func
 	sv.diff_func = diff_func

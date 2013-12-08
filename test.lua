@@ -17,7 +17,7 @@ print( compute(c) )
 
 local a,b,c = var.scalar('a b c')
 
-d = a^b * a^c + b*b*b
+d = (a^b * a^c + b*b*b + a^(1-1)*0)*1
 
 print(d)
 
