@@ -125,6 +125,9 @@ local is = function(v,dtype) return v.dtype == dtype end
 local is_op = function(v,op) return v.op == op end
 
 local expr = function(name, dtype, args)
+  assert(op[name], "Undefined math operation " .. name)
+  assert(op[name][dtype],
+         "Undefined math operation " .. name .. " for type " .. dtype)
   local o = op[name][dtype]
   if o.compose_func then args = o.compose_func(table.unpack(args)) end
   if #args == 1 then
