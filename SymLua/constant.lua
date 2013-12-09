@@ -15,7 +15,7 @@ local CONSTANT = 'constant'
 
 local make_composer_n1 = function(reducer)
   return function(a)
-    return { var.constant(reducer(a())) }
+    return var.constant(reducer(a()))
   end
 end
 
@@ -29,7 +29,7 @@ local make_composer_n2 = function(reducer)
       v = (type(v) == "number" and v) or v()
       result = reducer(result, v)
     end
-    return { var.constant(result) }
+    return var.constant(result)
   end
 end
 

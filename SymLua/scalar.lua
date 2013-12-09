@@ -14,6 +14,7 @@ local math_n2_list      = SymLua.math_n2_list
 local coercion          = SymLua.coercion
 local infer             = SymLua.infer
 local commutative       = SymLua.commutative
+local expr              = SymLua.expr
 
 local CONSTANT = constant.dtype
 local SCALAR   = 'scalar'
@@ -90,7 +91,34 @@ add_op('add', '+', SCALAR,
        end)
 
 add_op('sub', '-', SCALAR,
-       nil,
+       function(...)
+	 local args = table.pack(...)
+	 assert(#args == 2)
+	 local a,b = ...
+	 if a == b then return var.constant(0) end
+	 return args
+	 -- local dict = {}
+	 -- local values = {}
+	 -- print("EOEOE")
+	 -- for i,v in ipairs(a.args) do
+	 --   print(i,v)
+	 --   dict[v.name]   = (dict[v.name] or 0) + 1
+	 --   values[v.name] = v
+	 -- end
+	 -- for i,v in ipairs(b.args) do
+	 --   print(i,v)
+	 --   dict[v.name]   = (dict[v.name] or 0) - 1
+	 --   values[v.name] = v
+	 -- end
+	 -- local result = {}
+	 -- for name,count in pairs(dict) do
+	 --   print(name, count)
+	 --   if count > 0 then table.insert(result, values[name])
+	 --   elseif count <0 then table.insert(result, -values[name])
+	 --   end
+	 -- end
+	 -- return expr('add', SCALAR, result)
+       end,
        function(a,b) return a-b end)
 
 add_op('mul', '*', SCALAR,
@@ -105,7 +133,7 @@ add_op('mul', '*', SCALAR,
 				 end
 			       end)
 	 -- check cte == 0
-	 if cte == 0 then return { var.constant(0) } end
+	 if cte == 0 then return var.constant(0) end
 	 -- multiplication of pow with equal base
 	 local result,dict,vars = {},{},{}
 	 for i,v in ipairs(args) do
@@ -130,16 +158,26 @@ add_op('mul', '*', SCALAR,
 	 return aux
        end)
 
+add_op('unm', '-', SCALAR,
+       function(...)
+	 local args = table.pack(...)
+	 assert(#args == 1)
+	 local a = ...
+	 if is_op(a, 'unm') then return a.args[1] end
+	 return { a }
+       end,
+       function(a) return -a end)
+
 add_op('pow', '^', SCALAR,
        function(...)
 	 local args = table.pack(...)
 	 assert(#args == 2)
 	 local a,b = ...
 	 if is(a, CONSTANT) then
-	   if     a() == 1 then return { var.constant(1) }
-	   elseif a() == 0 then return { var.constant(0) }
+	   if     a() == 1 then return var.constant(1)
+	   elseif a() == 0 then return var.constant(0)
 	   end
-	 elseif is(b, CONSTANT) and b() == 0 then return { var.constant(1) }
+	 elseif is(b, CONSTANT) and b() == 0 then return var.constant(1)
 	 end
 	 return args
        end,

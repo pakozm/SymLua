@@ -130,8 +130,7 @@ local expr = function(name, dtype, args)
          "Undefined math operation " .. name .. " for type " .. dtype)
   local o = op[name][dtype]
   if o.compose_func then args = o.compose_func(table.unpack(args)) end
-  if #args == 1 then
-    return args[1]
+  if args.issvar then return args
   else
     local str_tbl = {} for i=1,#args do str_tbl[i] = tostring(args[i]) end
     local pretty = string.format("(%s %s)",
@@ -277,7 +276,7 @@ end
 
 svar_mt.__eq = function(a,b) return a.name == b.name end
 
-local make_op = function(name)
+local make_op2 = function(name)
   return function(a,b)
     a,b = coercion(a),coercion(b)
     local dtype = infer(a.dtype,b.dtype)
@@ -286,12 +285,20 @@ local make_op = function(name)
   end
 end
 
-svar_mt.__add = make_op('add')
-svar_mt.__sub = make_op('sub')
-svar_mt.__mul = make_op('mul')
-svar_mt.__div = make_op('div')
-svar_mt.__pow = make_op('pow')
-svar_mt.__unm = make_op('unm')
+local make_op1 = function(name)
+  return function(a)
+    a = coercion(a)
+    local e = expr( name, a.dtype, {a} )
+    return e
+  end
+end
+
+svar_mt.__add = make_op2('add')
+svar_mt.__sub = make_op2('sub')
+svar_mt.__mul = make_op2('mul')
+svar_mt.__div = make_op2('div')
+svar_mt.__pow = make_op2('pow')
+svar_mt.__unm = make_op1('unm')
 
 -----------------------------------------------------------------------------
 -----------------------------------------------------------------------------
@@ -315,6 +322,7 @@ return {
   commutative       = commutative,
   math_n1_list      = math_n1_list,
   math_n2_list      = math_n2_list,
+  expr              = expr,
   _NAME             = "SymLua",
   _VERSION          = "0.1",
 }

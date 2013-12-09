@@ -17,7 +17,7 @@ print( compute(c) )
 
 local a,b,c = var.scalar('a b c')
 
-d = c - c + c
+d = (2*a+b) - (2*a-b)
 
 print(d)
 
