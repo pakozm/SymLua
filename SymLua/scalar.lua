@@ -30,6 +30,8 @@ add_infer_rule(SCALAR, CONSTANT, SCALAR)
 
 ------------------------------------------------------------------------------
 
+local CTE = "@CTE@"
+
 local commutative_and_distributive_operation = function(args, op1, op2,
 							ident,
 							reducer1, reducer2)
@@ -40,7 +42,7 @@ local commutative_and_distributive_operation = function(args, op1, op2,
     if is_op(v,op1) then list = v.args end
     for j,vj in ipairs(list) do
       local vjtype = infer(vj.dtype,vj.dtype)
-      if vjtype == CONSTANT then dict.cte = reducer1((dict.cte or ident), vj())
+      if vjtype == CONSTANT then dict[CTE] = reducer1((dict[CTE] or ident), vj())
       else
 	if is_op(vj,op2) and #vj.args == 2 and ( is(vj.args[1],CONSTANT) or is(vj.args[2],CONSTANT) ) then
 	  -- distribute
@@ -57,12 +59,12 @@ local commutative_and_distributive_operation = function(args, op1, op2,
   end
   -- simplify replicated variables
   local result = { }
-  if dict.cte and dict.cte ~= ident then table.insert(result, var.constant(dict.cte)) end
+  if dict[CTE] and dict[CTE] ~= ident then table.insert(result, var.constant(dict[CTE])) end
   for i,v in pairs(vars) do
     if dict[v.name] > 1 then v = reducer2(dict[v.name], v) end
-    table.insert(result, v)
+    if v ~= var.constant(ident) then table.insert(result, v) end
   end
-  return commutative(result),dict.cte
+  return commutative(result),dict[CTE]
 end
 
 ------------------------------------------------------------------------------
@@ -73,7 +75,11 @@ add_op('add', '+', SCALAR,
 	 local func   = commutative_and_distributive_operation
 	 local result = func(args, 'add', 'mul', 0,
 			     function(a,b) return a+b end,
-			     function(count,a) return a*count end)
+			     function(count,a)
+			       if count == 0 then return var.constant(0)
+			       else return a*count
+			       end
+			     end)
 	 return result
        end,
        function(...)
@@ -83,13 +89,21 @@ add_op('add', '+', SCALAR,
 	 return aux
        end)
 
+add_op('sub', '-', SCALAR,
+       nil,
+       function(a,b) return a-b end)
+
 add_op('mul', '*', SCALAR,
        function(...)
 	 local args = table.pack(...)
 	 local func = commutative_and_distributive_operation
 	 local args,cte = func(args, 'mul', 'pow', 1,
 			       function(a,b) return a*b end,
-			       function(count,a) return a^count end)
+			       function(count,a)
+				 if count == 1 then return var.constant(1)
+				 else return a^count
+				 end
+			       end)
 	 -- check cte == 0
 	 if cte == 0 then return { var.constant(0) } end
 	 -- multiplication of pow with equal base
