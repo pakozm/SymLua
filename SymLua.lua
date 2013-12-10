@@ -116,11 +116,6 @@ end
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
 
-local commutative = function(args)
-  table.sort(args, function(a,b) return a.name < b.name end)
-  return args
-end
-
 local is = function(v,dtype) return v.dtype == dtype end
 local is_op = function(v,op) return v.op == op end
 
@@ -129,7 +124,12 @@ local expr = function(name, dtype, args)
   assert(op[name][dtype],
          "Undefined math operation " .. name .. " for type " .. dtype)
   local o = op[name][dtype]
-  if o.compose_func then args = o.compose_func(table.unpack(args)) end
+  if o.compose_func then
+    if o.commutative then
+      table.sort(args, function(a,b) return a.name < b.name end)
+    end
+    args = o.compose_func(table.unpack(args))
+  end
   if args.issvar then return args
   else
     local str_tbl = {} for i=1,#args do str_tbl[i] = tostring(args[i]) end
@@ -138,11 +138,12 @@ local expr = function(name, dtype, args)
 				 table.concat(str_tbl, " "))
     --    local pretty = string.format("( %s )",
     --				 table.concat(str_tbl, o.pretty_name))
-    local sv = svar(pretty, dtype)
-    sv.op   = name
-    sv.args = args
-    sv.func = function(_,...) return o.compute_func(...) end
-    sv.diff = o.diff_func
+    local sv = svar(pretty, dtype, name)
+    sv.op    = name
+    sv.args  = args
+    sv.func  = function(_,...) return o.compute_func(...) end
+    sv.diff  = o.diff_func
+    sv.isop  = true
     return sv
   end
 end
@@ -164,9 +165,19 @@ local add_infer_rule = function(a_dtype, b_dtype, result)
   infer_rules[a_dtype][b_dtype] = result
 end
 
-local add_op = function(name, pretty_name, dtype,
+params_check={ "name", "symb", "dtype", "commutative" }
+inv_params_check={} for i,v in pairs(params_check) do inv_params_check[v]=i end
+local add_op = function(params,
 			compose_func, compute_func, diff_func)
   assert(compose_func or compute_func)
+  for i,v in pairs(params) do
+    assert(inv_params_check[i], "Incorrect param name: " .. i)
+  end
+  assert(params.name and params.dtype, "Required name and dtype params")
+  local name = params.name
+  local pretty_name = params.symb or name
+  local dtype = params.dtype
+  local commutative = params.commutative or false
   if not op[name] then
     op[name] = {}
     setmetatable(op[name],
@@ -184,6 +195,7 @@ local add_op = function(name, pretty_name, dtype,
 		 })
   end
   op[name][dtype] = {
+    commutative  = commutative,
     pretty_name  = pretty_name,
     compose_func = compose_func,
     compute_func = compute_func,
@@ -238,11 +250,12 @@ end
 --
 --  op = a string indicating the name of the operation, when needed
 
-svar = function(name, dtype)
+svar = function(name, dtype, class)
   -- default values of symbolic variable
   local v = {
     name  = name,
     dtype = dtype,
+    class = class or dtype,
     args  = { },
     issvar = true,
   }

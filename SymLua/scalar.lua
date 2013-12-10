@@ -13,7 +13,6 @@ local math_n1_list      = SymLua.math_n1_list
 local math_n2_list      = SymLua.math_n2_list
 local coercion          = SymLua.coercion
 local infer             = SymLua.infer
-local commutative       = SymLua.commutative
 local expr              = SymLua.expr
 
 local CONSTANT = constant.dtype
@@ -65,12 +64,12 @@ local commutative_and_distributive_operation = function(args, op1, op2,
     if dict[v.name] > 1 then v = reducer2(dict[v.name], v) end
     if v ~= var.constant(ident) then table.insert(result, v) end
   end
-  return commutative(result),dict[CTE]
+  return result,dict[CTE]
 end
 
 ------------------------------------------------------------------------------
 
-add_op('add', '+', SCALAR,
+add_op({ name='add', symb='+', dtype=SCALAR, commutative=true },
        function(...)
 	 local args   = table.pack(...)
 	 local func   = commutative_and_distributive_operation
@@ -90,7 +89,7 @@ add_op('add', '+', SCALAR,
 	 return aux
        end)
 
-add_op('sub', '-', SCALAR,
+add_op({ name='sub', symb='-', dtype=SCALAR },
        function(...)
 	 local args = table.pack(...)
 	 assert(#args == 2)
@@ -121,7 +120,7 @@ add_op('sub', '-', SCALAR,
        end,
        function(a,b) return a-b end)
 
-add_op('mul', '*', SCALAR,
+add_op({ name='mul', symb='*', dtype=SCALAR },
        function(...)
 	 local args = table.pack(...)
 	 local func = commutative_and_distributive_operation
@@ -149,7 +148,7 @@ add_op('mul', '*', SCALAR,
 	   if dict[i] ~= 1 then e = e ^ dict[i] end
 	   table.insert(result, e)
 	 end
-	 return commutative(result)
+	 return result
        end,
        function(...)
 	 local args = table.pack(...)
@@ -158,7 +157,7 @@ add_op('mul', '*', SCALAR,
 	 return aux
        end)
 
-add_op('unm', '-', SCALAR,
+add_op({ name='unm', symb='-', dtype=SCALAR },
        function(...)
 	 local args = table.pack(...)
 	 assert(#args == 1)
@@ -168,7 +167,7 @@ add_op('unm', '-', SCALAR,
        end,
        function(a) return -a end)
 
-add_op('pow', '^', SCALAR,
+add_op({ name='pow', symb='^', dtype=SCALAR },
        function(...)
 	 local args = table.pack(...)
 	 assert(#args == 2)
