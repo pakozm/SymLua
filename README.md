@@ -1,6 +1,9 @@
 SymLua
 ======
 
+This project has been continued at [April-ANN](https://github.com/pakozm/april-ann/)
+as the `autodiff` package.
+
 A conceptual draft for Symbolic Calculus in Lua.
 
 Test it doing:
